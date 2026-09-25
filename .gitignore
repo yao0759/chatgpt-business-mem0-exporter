@@ -1,0 +1,31 @@
+# Conversation exports and generated files
+export/
+exports/
+chatgpt_business_export/
+chatgpt_current_workspace_export/
+generated_files/
+native_mhtml/
+
+# Runtime state, checkpoints, reviews and logs
+state/
+work/
+*.jsonl
+*.log
+*.mhtml
+
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+
+# Python and editor files
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
