@@ -1,6 +1,6 @@
 # ChatGPT Business 对话导出与 mem0 导入
 
-这个项目通过 Playwright 连接到已经登录 ChatGPT Business 的 Microsoft Edge，先扫描侧栏中的对话链接，再将对话保存为 JSON 和 Markdown。随后可以把原始消息按 `user` / `assistant` 角色写入自托管 mem0，也可以调用兼容 OpenAI Chat Completions 的 Ark 模型，将对话提炼成带证据的长期记忆后再写入 mem0。
+这个项目通过 Playwright 连接到已经登录 ChatGPT Business 的 Microsoft Edge，先扫描侧栏中的对话链接，再将对话保存为 JSON 和 Markdown。随后可以把原始消息按 `user` / `assistant` 角色写入自托管 mem0，也可以调用任何兼容 OpenAI Chat Completions API 的第三方模型或 Agent 服务，将对话提炼成带证据的长期记忆后再写入 mem0。Ark 是默认配置示例，不是必需依赖。
 
 ChatGPT Business 当前没有面向成员的自助数据导出功能，因此本项目读取浏览器已经渲染、且当前账号有权访问的内容。它不绕过登录、工作区权限或保留策略。
 
@@ -13,7 +13,7 @@ ChatGPT Business 当前没有面向成员的自助数据导出功能，因此本
 - 等待页面内容连续稳定后才保存，避免把尚未加载完整的页面当作成功。
 - 遇到 HTTP 403、429 或页面访问限制时停止批处理并保留进度。
 - 原文导入时保留 `user`、`assistant`、`system`、`tool` 角色及消息顺序。
-- 可用 Ark 提炼已验证方案、待验证建议、失败尝试、用户偏好、项目背景和未解决问题。
+- 可用兼容 OpenAI Chat Completions API 的第三方模型或 Agent 服务，提炼已验证方案、待验证建议、失败尝试、用户偏好、项目背景和未解决问题。
 - 使用本地检查点与 mem0 元数据去重，支持中断后继续。
 
 ## 安全边界
@@ -25,7 +25,7 @@ ChatGPT Business 当前没有面向成员的自助数据导出功能，因此本
 - `MEM0_API_KEY`：mem0 服务密钥。
 - `MEM0_BASE_URL`：mem0 地址，默认 `http://127.0.0.1:18765`。
 - `MEM0_USER_ID`：写入 mem0 时使用的用户标识，默认 `default`。
-- `ARK_API_KEY`：Ark API 密钥。
+- `ARK_API_KEY`：提炼服务的 API 密钥。变量名为兼容旧版本而保留，可填写任意兼容服务的密钥。
 
 提炼脚本会遮蔽常见格式的密钥和令牌，但自动遮蔽不能保证识别所有敏感信息。若对话包含机密资料，先审核本地 JSONL，再执行写入。
 
@@ -36,7 +36,7 @@ ChatGPT Business 当前没有面向成员的自助数据导出功能，因此本
 - Microsoft Edge
 - 可以访问 ChatGPT Business 的账号
 - 自托管 mem0 兼容服务
-- 可选：兼容 OpenAI Chat Completions 的 Ark 服务
+- 可选：提供 OpenAI API 兼容 `/chat/completions` 接口的第三方模型或 Agent 服务
 
 安装依赖：
 
@@ -150,12 +150,19 @@ python .\scripts\import_chatgpt_business_json_to_mem0.py `
 
 写入使用 `infer=false`，避免 mem0 再次改写原文。长消息才会拆分，每个分片仍保留角色和顺序。
 
-## 5. 使用 Ark 提炼长期记忆
+## 5. 使用兼容 OpenAI API 的第三方服务提炼长期记忆
 
-设置 Ark 密钥：
+提炼器不限定服务商。第三方服务需要满足以下条件：
+
+- 提供兼容 OpenAI Chat Completions 的 HTTP 接口；
+- 接受 `model`、`messages`、`temperature` 和 `max_tokens` 字段；
+- 返回 `choices[0].message.content`；
+- 能按提示输出 JSON。
+
+设置第三方服务密钥。`ARK_API_KEY` 是历史兼容变量名，并不表示只能使用 Ark：
 
 ```powershell
-$env:ARK_API_KEY = "你的密钥"
+$env:ARK_API_KEY = "第三方服务的 API 密钥"
 ```
 
 生成本地审核文件：
@@ -165,8 +172,12 @@ New-Item -ItemType Directory -Force .\state | Out-Null
 python .\scripts\distill_chatgpt_business_to_mem0.py prepare `
   .\export\json `
   --output .\state\distilled-review.jsonl `
+  --ark-url "https://your-provider.example/v1" `
+  --model "your-model-name" `
   --max-chars 5000
 ```
+
+`--ark-url` 同样是为兼容旧版本保留的参数名。这里应填写服务的 API 根地址，脚本会在其后调用 `/chat/completions`。例如，Ark 可以继续使用默认地址和默认模型；其他兼容服务只需替换 URL、模型名和密钥。
 
 脚本要求每条提炼结果包含原消息中的逐字证据，并验证证据确实存在。助手提出的做法在没有用户确认时只能标记为“待验证建议”。
 
@@ -192,7 +203,7 @@ python .\scripts\distill_chatgpt_business_to_mem0.py import `
 
 仓库保留了三个编排脚本：
 
-- `run_chatgpt_mem0_background.py`：依次执行原文导入、Ark 提炼、重试和提炼记忆导入。
+- `run_chatgpt_mem0_background.py`：依次执行原文导入、第三方模型提炼、重试和提炼记忆导入。
 - `import_distilled_incrementally.py`：提炼进行时周期性写入已经准备好的记忆。
 - `run_current_workspace_mem0_import.py`：等待旧任务与新导出都完成，并检查 JSON、Markdown 和清单数量一致后再导入。
 
